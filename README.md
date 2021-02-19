@@ -1,3 +1,19 @@
+
+First let me say I really love this clean solution to thread hooks. 
+However when I began to use it there where some limitations that needed to be solve.
+I'm sure others will be interested in these and therefore my updated Fork.  
+**Will compile in Berlin and Up!**
+## Requires [madTools](http://madshi.net/)
+One fix was to replaced *MakeObjectInstance* with *madTools.MethodToProcedure*, you will require that library which I believe is no longer free.  
+In Win64 this returns the correct sized parameter and also allows access to the *iCode* parameter passed in by the Hook callback function.
+# Change Log
+- replaced *MakeObjectInstance* with *madTools.MethodToProcedure*
+- moved *TMSLLHOOKSTRUCT* to module level for *TMouseHook* Demo
+- added some records and helpers for TKeyStates, on demand translation
+- added short documentation for Hooks, make Journal Hooks experimental since I can't get those to work on Windows 10.
+- updated the demo app to work with the new layout and added a couple of demo options.
+----
+
 # Hooks
 Keyboard and Mouse hooks as classes
 

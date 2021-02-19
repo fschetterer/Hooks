@@ -1,70 +1,28 @@
 unit Winapi.Hooks;
 
 interface
+{$REGION 'History'}
+//  06-Mar-2020 - Updated, replaced MakeObjectInstance with madTools.MethodToProcedure
+//              - Now uses simple access to Pointer Records and Record Helpers to translate keys on demand
+{$ENDREGION}
+{$T-} // In the {$T-} state, the result of the @ operator is always an untyped pointer (Pointer) that is compatible with all other pointer types.
 
 uses
-  Winapi.Windows, Winapi.Messages, System.Classes;
-
-{$M+}
-
-const
-  MAX_KEY_NAME_LENGTH = 100;
-  SHIFTED = $8000;
-
-  (*
-    * Low level hook flags
-  *)
-  LLKHF_EXTENDED = $01;
-  LLKHF_INJECTED = $10;
-  LLKHF_ALTDOWN = $20;
-  LLKHF_UP = $80;
-
-const
-  VK_A = 65;
-  VK_B = 66;
-  VK_C = 67;
-  VK_D = 68;
-  VK_E = 69;
-  VK_F = 70;
-  VK_G = 71;
-  VK_H = 72;
-  VK_I = 73;
-  VK_J = 74;
-  VK_K = 75;
-  VK_L = 76;
-  VK_M = 77;
-  VK_N = 78;
-  VK_O = 79;
-  VK_P = 80;
-  VK_Q = 81;
-  VK_R = 82;
-  VK_S = 83;
-  VK_T = 84;
-  VK_U = 85;
-  VK_V = 86;
-  VK_W = 87;
-  VK_X = 88;
-  VK_Y = 89;
-  VK_Z = 90;
-  VK_0 = 48;
-  VK_1 = 49;
-  VK_2 = 50;
-  VK_3 = 51;
-  VK_4 = 52;
-  VK_5 = 53;
-  VK_6 = 54;
-  VK_7 = 55;
-  VK_8 = 56;
-  VK_9 = 57;
+  Winapi.Windows, Winapi.Messages, System.Classes, System.SysUtils,
+  madTools;
 
 type
-  THook = class;
-  THookMessage = TMessage;
-  THookNotify = reference to procedure(Hook: THook; var HookMsg: THookMessage);
+  PMsllHookStruct = ^MSLLHOOKSTRUCT;
+  MSLLHOOKSTRUCT = packed record
+    pt: TPoint;
+    mouseData: DWORD;
+    flags: DWORD;
+    time: DWORD;
+    dwExtraInfo: ULONG_PTR;
+  end;
+  TMsllHookStruct = MSLLHOOKSTRUCT;
 
-  TKeyState = (ksKeyDown = 0, ksKeyIsDown = 1, ksKeyUp = 2);
-  pKBDLLHOOKSTRUCT = ^KBDLLHOOKSTRUCT;
-
+  PKBDLLHOOKSTRUCT = ^KBDLLHOOKSTRUCT;
   KBDLLHOOKSTRUCT = packed record
     vkCode: DWORD;
     ScanCode: DWORD;
@@ -72,43 +30,106 @@ type
     time: DWORD;
     dwExtraInfo: ULONG_PTR;
   end;
-
   TKBDLLHookStruct = KBDLLHOOKSTRUCT;
 
-  pLowLevelKeyStates = ^TLowLevelKeyStates;
+  TKeyStatesFlags = (
+    /// <summary>
+    ///   24: Indicates whether the key is an extended key, such as a function key or a key on the numeric keypad. The value is 1 if the key is an extended key; otherwise, it is 0
+    /// </summary>
+    kbExtended,
+    kbReserved_25, kbReserved_26, kbReserved_27, kbReserved_28,
+    /// <summary>
+    ///   29: The context code. The value is 1 if the ALT key is down; otherwise, it is 0.
+    /// </summary>
+    kbAltDwn,
+    /// <summary>
+    ///   30: The previous key state. The value is 1 if the key is down before the message is sent; it is 0 if the key is up.
+    /// </summary>
+    kbPrevState,
+    /// <summary>
+    ///   31: The transition state. The value is 0 if the key is being pressed and 1 if it is being released.
+    /// </summary>
+    kbTransitionState);
 
-  TLowLevelKeyStates = packed record
-    ExtendKey: Boolean;
-    InjectedKey: Boolean;
-    AltDown: Boolean;
-    CtrlDown: Boolean;
-    ShiftDown: Boolean;
-    KeyState: TKeyState;
-    KeyboardState: TKeyboardState;
+  PKeyStates = ^TKeyStates;
+  /// <summary>
+  ///   Keystroke Message Flags &lt;br /&gt;First 32 bits of LParam
+  /// </summary>
+  TKeyStates = record
+    case LPARAM of
+      0: (
+          /// <summary>
+          ///   0-15: The repeat count. The value is the number of times the keystroke is repeated as a result of the user's holding down the key
+          /// </summary>
+          TimesRepeated: uint16;
+           /// <summary>
+           ///   16-23: The scan code. The value depends on the OEM.
+           /// </summary>
+           ScanCode: uint8;
+           /// <summary>
+           ///   24-34: Flags
+           /// </summary>
+           Flags: set of TKeyStatesFlags);
+      1: (
+          /// <summary>
+          ///   LParam is signed but differs in Bitness
+          /// </summary>
+          lParam: LPARAM);
   end;
 
-  pKeyNames = ^TKeyNames;
-
-  TKeyNames = packed record
-    ScanCode: Integer;
-    KeyChar: array [0 .. 1] of Char;
-    KeyExtName: string;
-    // array [0 .. MAX_KEY_NAME_LENGTH] of Char;
+  /// <summary>
+  ///   Simplifies access to flag data
+  /// </summary>
+  TKeyStatesHelper = record helper for TKeyStates
+    function AltDown: Boolean; inline;
+    function CtrlDown: Boolean; inline;
+    function ExtendKey: Boolean; inline;
+    function ShiftDown: Boolean; inline;
+    function IsKeyDown: Boolean; inline;
   end;
 
-  TKeyStates = packed record
-    KeyState: TKeyState;
-    KeyDown: Boolean;
-    ShiftDown: Boolean;
-    AltDown: Boolean;
-    CtrlDown: Boolean;
-    ExtendedKey: Boolean;
-    MenuKey: Boolean;
-    KeyRepeated: Boolean;
-    RepeatCount: Integer;
-    CharCount: Integer;
+  /// <summary>
+  ///   Simplifies access to flag data
+  /// </summary>
+  TKBDLLHookStructHelper = record helper for TKBDLLHookStruct
+    function AltDown: Boolean; inline;
+    function CtrlDown: Boolean; inline;
+    function ExtendKey: Boolean; inline;
+    function InjectedKey: Boolean; inline;
+    function ShiftDown: Boolean; inline;
+    function IsKeyDown: Boolean; inline;
   end;
 
+  /// <summary>
+  ///   Newly declared, the original method had No 'Code' and only Cardinal wParam due to MakeObjectInstance
+  /// </summary>
+  THookMessage =  record
+    Code : Integer;
+    wParam: WPARAM;
+    lParam: LPARAM;
+    Handled: LongBool;
+  end;
+
+  THook = class;
+  THookNotify = reference to procedure(AHook: THook; var AHookMsg: THookMessage);
+
+  /// <summary>
+  ///   Replaced MakeObjectInstance with MethodToProcedure
+  /// </summary>
+  /// <remarks>
+  ///   <list type="bullet">
+  ///     <item>
+  ///       <b>MakeObjectInstance</b><br />Testing in x64 shows that even though TFNHookProc takes a WPARAM which is a UINT64 the TMessage only brings along the Cardinal part
+  ///       of it, furthermore it always looses the first parameter expecting it to be the value of Self. So we had no access to iCode using this method.
+  ///     </item>
+  ///     <item>
+  ///       <b>MethodToProcedure</b><br />From madTools, works like a charm will need to use this more often. <br />
+  ///     </item>
+  ///   </list>
+  /// </remarks>
+  /// <seealso href="http://help.madshi.net/MethodToProc.htm">
+  ///   MethodToProcedure
+  /// </seealso>
   TCustomHook = class abstract
   strict private
     FActive: Boolean;
@@ -118,14 +139,12 @@ type
 
     FOnPreExecute: THookNotify;
     FOnPostExecute: THookNotify;
-    procedure HookProc(var HookMsg: THookMessage);
-    procedure SetActive(const Value: Boolean);
-  private
-
+    function FNHookProc(iCode : integer; wParam : WPARAM; lParam: LPARAm): LResult; stdcall;
+    procedure SetActive(const AValue: Boolean);
   protected
     function GetHookID: Integer; virtual; abstract;
-    procedure PreExecute(var HookMsg: THookMessage; var Handled: Boolean); virtual;
-    procedure PostExecute(var HookMsg: THookMessage); virtual;
+    procedure PreExecute(var AHookMsg: THookMessage); virtual;
+    procedure PostExecute(var AHookMsg: THookMessage); virtual;
 
     property Active: Boolean read FActive write SetActive;
     property OnPreExecute: THookNotify read FOnPreExecute write FOnPreExecute;
@@ -138,84 +157,140 @@ type
   end;
 
   THook = class abstract(TCustomHook)
-  published
+  public
     property Active;
     property OnPreExecute;
     property OnPostExecute;
     property ThreadID;
   end;
 
+  /// <summary>
+  ///   The WH_CALLWNDPROC and WH_CALLWNDPROCRET hooks enable you to monitor messages sent to window procedures. The system calls a WH_CALLWNDPROC hook procedure before passing
+  ///   the message to the receiving window procedure, and calls the WH_CALLWNDPROCRET hook procedure after the window procedure has processed the message.
+  /// </summary>
   TCallWndProcHook = class sealed(THook)
   private
-    FCWPStruct: TCWPStruct;
+    FCWPStruct: PCWPStruct;
   protected
     function GetHookID: Integer; override;
-    procedure PreExecute(var HookMsg: THookMessage; var Handled: Boolean); override;
-    procedure PostExecute(var HookMsg: THookMessage); override;
+    procedure PreExecute(var AHookMsg: THookMessage); override;
   public
-    property CWPStruct: TCWPStruct read FCWPStruct;
+    property CWPStruct: PCWPStruct read FCWPStruct;
   end;
 
+  /// <summary>
+  ///   The WH_CALLWNDPROC and WH_CALLWNDPROCRET hooks enable you to monitor messages sent to window procedures. The system calls a WH_CALLWNDPROC hook procedure before passing
+  ///   the message to the receiving window procedure, and calls the WH_CALLWNDPROCRET hook procedure after the window procedure has processed the message.
+  /// </summary>
   TCallWndProcRetHook = class sealed(THook)
   private
-    FCWPRetStruct: TCWPRetStruct;
+    FCWPRetStruct: PCWPRetStruct;
   protected
     function GetHookID: Integer; override;
-    procedure PreExecute(var HookMsg: THookMessage; var Handled: Boolean); override;
-    procedure PostExecute(var HookMsg: THookMessage); override;
+    procedure PreExecute(var AHookMsg: THookMessage); override;
   public
-    property CWPRetStruct: TCWPRetStruct read FCWPRetStruct;
+    property CWPRetStruct: PCWPRetStruct read FCWPRetStruct;
   end;
 
+  /// <summary>
+  ///   The system calls a WH_CBT hook procedure before activating, creating, destroying, minimizing, maximizing, moving, or sizing a window; before completing a system command;
+  ///   before removing a mouse or keyboard event from the system message queue; before setting the input focus; or before synchronizing with the system message queue. The value
+  ///   the hook procedure returns determines whether the system allows or prevents one of these operations. The WH_CBT hook is intended primarily for computer-based training
   TCBTHook = class sealed(THook)
   protected
     function GetHookID: Integer; override;
   end;
 
+  /// <summary>
+  ///   The system calls a WH_DEBUG hook procedure before calling hook procedures associated with any other hook in the system. You can use this hook to determine whether to allow
+  ///   the system to call hook procedures associated with other types of hooks.
+  /// </summary>
   TDebugHook = class sealed(THook)
   private
-    FDebugHookInfo: TDebugHookInfo;
+    FDebugHookInfo: PDebugHookInfo;
   protected
     function GetHookID: Integer; override;
-    procedure PreExecute(var HookMsg: THookMessage; var Handled: Boolean); override;
-    procedure PostExecute(var HookMsg: THookMessage); override;
+    procedure PreExecute(var AHookMsg: THookMessage); override;
   public
-    property DebugHookInfo: TDebugHookInfo read FDebugHookInfo;
+    property DebugHookInfo: PDebugHookInfo read FDebugHookInfo;
   end;
 
+  /// <summary>
+  ///   The WH_GETMESSAGE hook enables an application to monitor messages about to be returned by the GetMessage or PeekMessage function. You can use the WH_GETMESSAGE hook to
+  ///   monitor mouse and keyboard input and other messages posted to the message queue.
+  /// </summary>
   TGetMessageHook = class sealed(THook)
+  private
+    FMsg : PMsg;
   protected
     function GetHookID: Integer; override;
+    procedure PreExecute(var AHookMsg: THookMessage); override;
+  public
+    property Msg : PMsg read FMsg;
   end;
 
+  /// <summary>
+  ///   Can Not be a Thread Hook
+  /// </summary>
   TJournalPlaybackHook = class sealed(THook)
   protected
     function GetHookID: Integer; override;
-  end;
+  end experimental; // 'Blocked by Win 1984'
 
+  /// <summary>
+  ///   Can Not be a Thread Hook
+  /// </summary>
   TJournalRecordHook = class sealed(THook)
   protected
     function GetHookID: Integer; override;
-  end;
+  end experimental; // 'Blocked by Win 1984'
 
+  /// <summary>
+  ///   The WH_KEYBOARD hook enables an application to monitor message traffic for WM_KEYDOWN and WM_KEYUP messages about to be returned by the GetMessage or PeekMessage function.
+  ///   You can use the WH_KEYBOARD hook to monitor keyboard input posted to a message queue.
+  /// </summary>
   TKeyboardHook = class sealed(THook)
   private
-    FKeyState: TKeyStates;
-    FKeyNames: TKeyNames;
+    FKeyState: PKeyStates;
   protected
-    procedure PreExecute(var HookMsg: THookMessage; var Handled: Boolean); override;
-    procedure PostExecute(var HookMsg: THookMessage); override;
+    procedure PreExecute(var AHookMsg: THookMessage); override;
     function GetHookID: Integer; override;
   public
-    property KeyStates: TKeyStates read FKeyState;
-    property KeyName: TKeyNames read FKeyNames;
+    /// <summary>
+    ///   The Key's Extended name like "A,Esc,Num 4"
+    /// </summary>
+    function GetKeyExtName(const AHookMsg: THookMessage): string;
+    /// <summary>
+    ///   Unicode Character representing the key else #0
+    /// </summary>
+    function GetKeyChar(const AHookMsg: THookMessage): Char;
+    /// <summary>
+    ///   Read/Write Access to Key States
+    /// </summary>
+    property KeyStates: PKeyStates read FKeyState;
   end;
 
+  /// <summary>
+  ///   The WH_MOUSE hook enables you to monitor mouse messages about to be returned by the GetMessage or PeekMessage function. You can use the WH_MOUSE hook to monitor mouse
+  ///   input posted to a message queue.
+  /// </summary>
   TMouseHook = class sealed(THook)
+  private
+    FHookStruct : PMOUSEHOOKSTRUCT;
   protected
     function GetHookID: Integer; override;
+    procedure PreExecute(var AHookMsg: THookMessage); override;
+  public
+    /// <summary>
+    ///   Read/Write Access to Mouse Data
+    /// </summary>
+    property HookStruct: PMOUSEHOOKSTRUCT read FHookStruct write FHookStruct;
   end;
 
+  /// <summary>
+  ///   The WH_MSGFILTER and WH_SYSMSGFILTER hooks enable you to monitor messages about to be processed by a menu, scroll bar, message box, or dialog box, and to detect when a
+  ///   different window is about to be activated as a result of the user's pressing the ALT+TAB or ALT+ESC key combination. The WH_MSGFILTER hook can only monitor messages passed
+  ///   to a menu, scroll bar, message box, or dialog box created by the application that installed the hook procedure. The WH_SYSMSGFILTER hook monitors such messages for all
   TMsgHook = class sealed(THook)
   protected
     function GetHookID: Integer; override;
@@ -231,44 +306,41 @@ type
     function GetHookID: Integer; override;
   end;
 
+  /// <summary>
+  ///   The WH_KEYBOARD_LL hook enables you to monitor keyboard input events about to be posted in a thread input queue.
+  /// </summary>
   TLowLevelKeyboardHook = class sealed(THook)
+   type
   private
-    FHookStruct: TKBDLLHookStruct;
-    FLowLevelKeyStates: TLowLevelKeyStates;
-    FKeyNames: TKeyNames;
+    FHookStruct: PKBDLLHookStruct;
+    function GetKeyChar: Char;
+    function GetKeyExtName: string;
   protected
     function GetHookID: Integer; override;
-    procedure PreExecute(var HookMsg: THookMessage; var Handled: Boolean); override;
-    procedure PostExecute(var HookMsg: THookMessage); override;
+    procedure PreExecute(var AHookMsg: THookMessage); override;
   public
-    property HookStruct: TKBDLLHookStruct read FHookStruct;
-    property LowLevelKeyStates: TLowLevelKeyStates read FLowLevelKeyStates;
-    property KeyName: TKeyNames read FKeyNames;
+    /// <summary>
+    ///   Read/Write Access to Key States <br />
+    /// </summary>
+    property HookStruct: PKBDLLHookStruct read FHookStruct;
+    property KeyChar: Char read GetKeyChar;
+    property KeyExtName: string read GetKeyExtName;
   end;
 
+  /// <summary>
+  ///   The WH_MOUSE_LL hook enables you to monitor mouse input events about to be posted in a thread input queue.
+  /// </summary>
   TLowLevelMouseHook = class sealed(THook)
   strict private
-  type
-    pMSLLHOOKSTRUCT = ^MSLLHOOKSTRUCT;
-
-    MSLLHOOKSTRUCT = packed record
-      Pt: TPoint;
-      MouseData: DWORD;
-      flags: DWORD;
-      time: DWORD;
-      dwExtraInfo: ULONG_PTR;
-    end;
-
-    TMSLLHookStruct = MSLLHOOKSTRUCT;
-
-  var
-    FHookStruct: TMSLLHookStruct;
+    FHookStruct: PMSLLHookStruct;
   protected
     function GetHookID: Integer; override;
-    procedure PreExecute(var HookMsg: THookMessage; var Handled: Boolean); override;
-    procedure PostExecute(var HookMsg: THookMessage); override;
+    procedure PreExecute(var AHookMsg: THookMessage); override;
   public
-    property HookStruct: TMSLLHookStruct read FHookStruct;
+    /// <summary>
+    ///   Read/Write Access to Mouse Data
+    /// </summary>
+    property HookStruct: PMSLLHookStruct read FHookStruct;
   end;
 
 type
@@ -287,43 +359,30 @@ type
     class function CreateHook(AOwner: TComponent): T; static;
   end;
 
+
 implementation
 
-uses
-  System.SysUtils
-//  , VCL.Menus
-  ;
-
-{ TLowLevelMouseHook }
-
-function KeyIsDown(const nVirtKey: Integer): Boolean;
-begin
-  Result := (GetKeyState(nVirtKey) and SHIFTED) <> 0;
-end;
-
-function TLowLevelMouseHook.GetHookID: Integer;
-begin
-  Result := WH_MOUSE_LL;
-end;
-
-procedure TLowLevelMouseHook.PostExecute(var HookMsg: THookMessage);
-begin
-  inherited;
-  ZeroMemory(@FHookStruct, SizeOf(FHookStruct));
-end;
-
-procedure TLowLevelMouseHook.PreExecute(var HookMsg: THookMessage; var Handled: Boolean);
-begin
-  FHookStruct := pMSLLHOOKSTRUCT(HookMsg.WParam)^;
-  inherited;
-end;
+const
+  MAX_KEY_NAME_LENGTH = 100;
+  SHIFTED = $8000;
+ (*
+    * Low level hook flags
+  *)
+  LLKHF_EXTENDED = $01;
+  LLKHF_INJECTED = $10;
+  LLKHF_ALTDOWN = $20;
+  LLKHF_UP = $80;
 
 { TCustomHook }
 
 constructor TCustomHook.Create;
+{$REGION 'History'}
+//  07-Mar-2020 - replaced MakeObjectInstance with madTools.MethodToProcedure
+{$ENDREGION}
 begin
   inherited;
-  FHookProc := MakeObjectInstance(HookProc);
+  FHookProc := madTools.MethodToProcedure(Self, @TCustomHook.FNHookProc, 3);
+//** TFNHookProc(FHookProc)(MAXINT,MAXLONGLONG,MAXLONGLONG);
   FHook := 0;
   FActive := False;
   FThreadID := GetCurrentThreadID;
@@ -332,68 +391,56 @@ end;
 destructor TCustomHook.Destroy;
 begin
   Active := False;
-  FreeObjectInstance(FHookProc);
+  VirtualFree(FHookProc, 0, MEM_RELEASE);
+//  FreeObjectInstance(FHookProc); see class documentation
   inherited;
 end;
 
-procedure TCustomHook.HookProc(var HookMsg: THookMessage);
-var
-  Handled: Boolean;
+function TCustomHook.FNHookProc(iCode: integer; wParam: WPARAM; lParam: LPARAm): LResult;
+var LHookMsg: THookMessage;
 begin
-  Handled := False;
-  PreExecute(HookMsg, Handled);
-  if not Handled then
-  begin
-    HookMsg.Result := CallNextHookEx(FHook, HookMsg.Msg, HookMsg.WParam, HookMsg.LParam);
-    PostExecute(HookMsg);
-  end;
+  LHookMsg.Code    := iCode;
+  LHookMsg.wParam  := wParam;
+  LHookMsg.lParam  := lParam;
+  LHookMsg.Handled := False;
+  PreExecute(LHookMsg);
+  if not LHookMsg.Handled then begin
+    Result := CallNextHookEx(FHook, LHookMsg.Code, LHookMsg.wParam, LHookMsg.lParam);
+    PostExecute(LHookMsg);
+  end else Result := Ord(LHookMsg.Handled); // Non Zero
 end;
 
-procedure TCustomHook.PostExecute(var HookMsg: THookMessage);
+procedure TCustomHook.PostExecute(var AHookMsg: THookMessage);
 begin
   if Assigned(FOnPostExecute) then
-    FOnPostExecute(THook(Self), HookMsg)
+    FOnPostExecute(THook(Self), AHookMsg)
 end;
 
-procedure TCustomHook.PreExecute(var HookMsg: THookMessage; var Handled: Boolean);
+procedure TCustomHook.PreExecute(var AHookMsg: THookMessage);
 begin
   if Assigned(FOnPreExecute) then
-    FOnPreExecute(THook(Self), HookMsg);
-
-  Handled := HookMsg.Result <> 0;
+    FOnPreExecute(THook(Self), AHookMsg);
 end;
 
-procedure TCustomHook.SetActive(const Value: Boolean);
-var
-  ID: Integer;
+procedure TCustomHook.SetActive(const AValue: Boolean);
+var ID: Integer;
 begin
-  if FActive = Value then
-    Exit;
+  if FActive = AValue then Exit;
+  FActive := AValue;
 
-  FActive := Value;
-
-  case Active of
-    True:
-      begin
-        ID := GetHookID;
-
-        if ID in [WH_KEYBOARD_LL, WH_MOUSE_LL] then
-          FThreadID := 0;
-
-        FHook := SetWindowsHookEx(GetHookID, FHookProc, HInstance, FThreadID);
-        if (FHook = 0) then
-        begin
-          FActive := False;
-          raise Exception.Create(Classname + ' CREATION FAILED!');
-        end;
-      end;
-
-    False:
-      begin
-        if (FHook <> 0) then
-          UnhookWindowsHookEx(FHook);
-        FHook := 0;
-      end;
+  If Active then begin
+    ID := GetHookID;
+    if ID in [WH_KEYBOARD_LL, WH_MOUSE_LL] then
+      FThreadID := 0;
+    FHook := SetWindowsHookEx(GetHookID, FHookProc, HInstance, FThreadID);
+    if (FHook = 0) then begin
+      FActive := False;
+      raise Exception.Create(Classname + ' CREATION FAILED!');
+    end;
+  end else begin
+    if (FHook <> 0) then
+      UnhookWindowsHookEx(FHook);
+    FHook := 0;
   end;
 end;
 
@@ -404,65 +451,48 @@ begin
   Result := WH_KEYBOARD_LL;
 end;
 
-procedure TLowLevelKeyboardHook.PostExecute(var HookMsg: THookMessage);
-begin
-  ZeroMemory(@FHookStruct, SizeOf(TKBDLLHookStruct));
-  ZeroMemory(@FLowLevelKeyStates, SizeOf(TLowLevelKeyStates));
-  ZeroMemory(@FKeyNames, SizeOf(TKeyNames));
-  inherited;
-end;
-
-procedure TLowLevelKeyboardHook.PreExecute(var HookMsg: THookMessage; var Handled: Boolean);
+function TLowLevelKeyboardHook.GetKeyChar: Char;
+{$REGION 'History'}
+//  08-Mar-2020 - Created, on demand access to Char
+{$ENDREGION}
 var
   KBS: TKeyboardState;
-  VKeyName: array [0 .. MAX_KEY_NAME_LENGTH] of Char;
-  dwMsg: DWORD;
   CharCount: Integer;
+  Value : string;
 begin
-  CharCount := 1;
-  FHookStruct := pKBDLLHOOKSTRUCT(HookMsg.WParam)^;
-
   GetKeyboardState(KBS);
-  Move(KBS, FLowLevelKeyStates.KeyboardState, SizeOf(KBS));
-
-  with FLowLevelKeyStates do
-  begin
-    ExtendKey := (FHookStruct.flags and LLKHF_EXTENDED) <> 0;
-    InjectedKey := (FHookStruct.flags and LLKHF_INJECTED) <> 0;
-    AltDown := (FHookStruct.flags and LLKHF_ALTDOWN) <> 0;
-    CtrlDown := FHookStruct.vkCode in [VK_LCONTROL, VK_RCONTROL];
-    ShiftDown := FHookStruct.vkCode in [VK_LSHIFT, VK_RSHIFT];
-
-    if (FHookStruct.flags and LLKHF_UP) <> 0 then
-      KeyState := ksKeyUp
-    else
-      KeyState := ksKeyDown;
+  try
+    SetLength(Value, 4);
+    CharCount := ToUnicode(FHookStruct.vkCode, FHookStruct.ScanCode, KBS, Pchar(Value), 4, 0);
+  except
+    CharCount := 1;
   end;
 
+  Result := #0;
+  if CharCount > 0 then Result := Value.Chars[0];
+end;
+
+function TLowLevelKeyboardHook.GetKeyExtName: string;
+{$REGION 'History'}
+//  08-Mar-2020 - Created, on demand access to Key Name
+{$ENDREGION}
+var i : integer;  dwMsg: DWORD;
+begin
   dwMsg := 1;
   dwMsg := dwMsg + (FHookStruct.ScanCode shl 16);
   dwMsg := dwMsg + (FHookStruct.flags shl 24);
+  SetLength(Result, MAX_KEY_NAME_LENGTH);
+  i := GetKeyNameText(dwMsg, Pchar(Result), MAX_KEY_NAME_LENGTH);
+  SetLength(Result, i);
+end;
 
-
-  if GetKeyNameText(dwMsg, @VKeyName, SizeOf(VKeyName)) > 0 then
-    FKeyNames.KeyExtName := VKeyName
-  else
-    FKeyNames.KeyExtName := '';
-
-  ZeroMemory(@VKeyName, $D * SizeOf(Char));
-  ZeroMemory(@FKeyNames.KeyChar, 2 * SizeOf(Char));
-  FKeyNames.ScanCode := FHookStruct.vkCode;
-  try
-    CharCount :=
-{$IFDEF UNICODE}
-      ToUnicode(FHookStruct.vkCode, FHookStruct.ScanCode, KBS, @VKeyName, 2, 0);
-{$ELSE}
-      ToAscii(FHookStruct.vkCode, FHookStruct.ScanCode, KBS, @VKeyName, 0);
-{$ENDIF}
-  except
-
-  end;
-  Move(VKeyName, FKeyNames.KeyChar, CharCount);
+procedure TLowLevelKeyboardHook.PreExecute(var AHookMsg: THookMessage);
+{$REGION 'History'}
+//  08-Mar-2020 - Get Out if Code is less than Zero, Hook specific
+{$ENDREGION}
+begin
+  if (AHookMsg.Code < 0) then Exit;
+  FHookStruct      := PKBDLLHOOKSTRUCT(AHookMsg.LParam);
   inherited;
 end;
 
@@ -473,16 +503,14 @@ begin
   Result := WH_CALLWNDPROC;
 end;
 
-procedure TCallWndProcHook.PostExecute(var HookMsg: THookMessage);
+procedure TCallWndProcHook.PreExecute(var AHookMsg: THookMessage);
+{$REGION 'History'}
+//  08-Mar-2020 - Get Out if Code is less than Zero, Hook specific
+{$ENDREGION}
 begin
+  if (AHookMsg.Code < 0) then Exit;
+  FCWPStruct := PCWPStruct(AHookMsg.LParam);
   inherited;
-  ZeroMemory(@FCWPStruct, SizeOf(TCWPStruct));
-end;
-
-procedure TCallWndProcHook.PreExecute(var HookMsg: THookMessage; var Handled: Boolean);
-begin
-  inherited;
-  FCWPStruct := PCWPStruct(HookMsg.LParam)^;
 end;
 
 { TCallWndProcRetHook }
@@ -492,15 +520,13 @@ begin
   Result := WH_CALLWNDPROCRET;
 end;
 
-procedure TCallWndProcRetHook.PostExecute(var HookMsg: THookMessage);
+procedure TCallWndProcRetHook.PreExecute(var AHookMsg: THookMessage);
+{$REGION 'History'}
+//  08-Mar-2020 - Get Out if Code is less than Zero, Hook specific
+{$ENDREGION}
 begin
-  inherited;
-  ZeroMemory(@FCWPRetStruct, SizeOf(TCWPRetStruct));
-end;
-
-procedure TCallWndProcRetHook.PreExecute(var HookMsg: THookMessage; var Handled: Boolean);
-begin
-  FCWPRetStruct := pCWPRetStruct(HookMsg.LParam)^;
+  if (AHookMsg.Code < 0) then Exit;
+  FCWPRetStruct := pCWPRetStruct(AHookMsg.LParam);
   inherited;
 end;
 
@@ -518,15 +544,13 @@ begin
   Result := WH_DEBUG;
 end;
 
-procedure TDebugHook.PostExecute(var HookMsg: THookMessage);
+procedure TDebugHook.PreExecute(var AHookMsg: THookMessage);
+{$REGION 'History'}
+//  08-Mar-2020 - Get Out if Code is less than Zero, Hook specific
+{$ENDREGION}
 begin
-  inherited;
-  ZeroMemory(@FDebugHookInfo, SizeOf(TDebugHookInfo));
-end;
-
-procedure TDebugHook.PreExecute(var HookMsg: THookMessage; var Handled: Boolean);
-begin
-  FDebugHookInfo := pDebugHookInfo(HookMsg.LParam)^;
+  if (AHookMsg.Code < 0) then Exit;
+  FDebugHookInfo := PDebugHookInfo(AHookMsg.LParam);
   inherited;
 end;
 
@@ -535,6 +559,16 @@ end;
 function TGetMessageHook.GetHookID: Integer;
 begin
   Result := WH_GETMESSAGE;
+end;
+
+procedure TGetMessageHook.PreExecute(var AHookMsg: THookMessage);
+{$REGION 'History'}
+//  08-Mar-2020 - Get Out if Code is less than Zero, Hook specific
+{$ENDREGION}
+begin
+  if (AHookMsg.Code < 0) then Exit;
+  FMsg             := PMsg(AHookMsg.lParam);
+  inherited;
 end;
 
 { TJournalPlaybackHook }
@@ -558,65 +592,46 @@ begin
   Result := WH_KEYBOARD;
 end;
 
-procedure TKeyboardHook.PostExecute(var HookMsg: THookMessage);
+procedure TKeyboardHook.PreExecute(var AHookMsg: THookMessage);
+{$REGION 'History'}
+//  08-Mar-2020 - Get Out if Code is less than Zero, Hook specific
+{$ENDREGION}
 begin
+  if (AHookMsg.Code < 0) then Exit;
+  FKeyState := @AHookMsg.LParam;
   inherited;
-  ZeroMemory(@FKeyState, SizeOf(TKeyState));
-  ZeroMemory(@FKeyNames, SizeOf(TKeyNames));
 end;
 
-procedure TKeyboardHook.PreExecute(var HookMsg: THookMessage; var Handled: Boolean);
+function TKeyboardHook.GetKeyExtName(const AHookMsg: THookMessage): string;
+{$REGION 'History'}
+//  08-Mar-2020 - Created, on demand access to Key Name
+{$ENDREGION}
+var i : integer;
+begin
+  SetLength(Result, MAX_KEY_NAME_LENGTH);
+  i := GetKeyNameText(AHookMsg.LParam, Pchar(Result), MAX_KEY_NAME_LENGTH);
+  SetLength(Result, i);
+end;
+
+function TKeyboardHook.GetKeyChar(const AHookMsg: THookMessage): Char;
+{$REGION 'History'}
+//  08-Mar-2020 - Created, on demand access to Char
+{$ENDREGION}
 var
   KBS: TKeyboardState;
-  VKeyName: array [0 .. MAX_KEY_NAME_LENGTH - 1] of Char;
   CharCount: Integer;
+  Value : string;
 begin
-  FKeyState.KeyDown := (HookMsg.LParam and (1 shl 31)) = 0;
-  FKeyState.KeyRepeated := (HookMsg.LParam and (1 shl 30)) = 0;
-  FKeyState.AltDown := KeyIsDown(VK_MENU);
-  FKeyState.MenuKey := (HookMsg.LParam and (1 shl 28)) = 0;
-  FKeyState.ExtendedKey := (HookMsg.LParam and (1 shl 24)) = 0;
-  FKeyState.CtrlDown := KeyIsDown(VK_CONTROL);
-  FKeyState.ShiftDown := (GetKeyState(VK_SHIFT) and (1 shl 15)) = 0;
-  FKeyState.KeyState := TKeyState(HookMsg.LParam shr 30);
-
-  FKeyNames.ScanCode := HookMsg.Msg;
-
-  if (FKeyState.KeyRepeated and FKeyState.KeyDown) then
-    Inc(FKeyState.RepeatCount)
-  else
-    FKeyState.RepeatCount := 0;
-
   GetKeyboardState(KBS);
-
-  if GetKeyNameText(HookMsg.WParam, @VKeyName, SizeOf(VKeyName)) > 0 then
-    FKeyNames.KeyExtName := VKeyName
-  else
-    FKeyNames.KeyExtName := '';
-
-  ZeroMemory(@VKeyName, $D * SizeOf(Char));
-  ZeroMemory(@FKeyNames.KeyChar, $2 * SizeOf(Char));
   try
-    CharCount :=
-{$IFDEF UNICODE}
-      ToUnicode(HookMsg.Msg, HookMsg.LParam, KBS, @VKeyName, 2, 0);
-{$ELSE}
-      ToAscii(HookMsg.Msg, HookMsg.LParam, KBS, @VKeyName, 0);
-{$ENDIF}
+    SetLength(Value, 4);
+    CharCount := ToUnicode(AHookMsg.WParam, AHookMsg.LParam, KBS, Pchar(Value), 4, 0);
   except
     CharCount := 1;
   end;
 
-  if VKeyName[0] = VKeyName[1] then
-    CharCount := 1;
-
-  // There is a minor bug in Windows when pressing the TREMA (и) key
-  // ToUnicode actual return two chars (ии) insted of one (и)
-
-  FKeyState.CharCount := CharCount;
-  Move(VKeyName, FKeyNames.KeyChar, CharCount * SizeOf(Char));
-
-  inherited;
+  Result := #0;
+  if CharCount > 0 then Result := Value.Chars[0];
 end;
 
 { TMouseHook }
@@ -624,6 +639,16 @@ end;
 function TMouseHook.GetHookID: Integer;
 begin
   Result := WH_MOUSE;
+end;
+
+procedure TMouseHook.PreExecute(var AHookMsg: THookMessage);
+{$REGION 'History'}
+//  08-Mar-2020 - Get Out if Code is less than Zero, Hook specific
+{$ENDREGION}
+begin
+  if (AHookMsg.Code < 0) then Exit;
+  FHookStruct    := PMOUSEHOOKSTRUCT(AHookMsg.LParam);
+  inherited;
 end;
 
 { TMsgHook }
@@ -647,6 +672,31 @@ begin
   Result := WH_SYSMSGFILTER;
 end;
 
+{ TLowLevelMouseHook }
+
+function TLowLevelMouseHook.GetHookID: Integer;
+begin
+  Result := WH_MOUSE_LL;
+end;
+
+procedure TLowLevelMouseHook.PreExecute(var AHookMsg: THookMessage);
+{$REGION 'History'}
+//  08-Mar-2020 - Get Out if Code is less than Zero, Hook specific
+{$ENDREGION}
+begin
+  if (AHookMsg.Code < 0) then Exit;
+  FHookStruct := PMSLLHOOKSTRUCT(AHookMsg.WParam);
+  inherited;
+end;
+
+{ THookInstance<T> }
+
+class function THookInstance<T>.CreateHook(AOwner: TComponent): T;
+begin
+  Result := THookContainer<T>.Construct(AOwner)
+end;
+
+
 { THookContainer<T> }
 
 class function THookContainer<T>.Construct(AOwner: TComponent): T;
@@ -666,11 +716,60 @@ begin
   inherited;
 end;
 
-{ THookInstance<T> }
-
-class function THookInstance<T>.CreateHook(AOwner: TComponent): T;
+function TKBDLLHookStructHelper.AltDown: Boolean;
 begin
-  Result := THookContainer<T>.Construct(AOwner)
+  Result := (flags and LLKHF_ALTDOWN) <> 0;
+end;
+
+function TKBDLLHookStructHelper.CtrlDown: Boolean;
+begin
+  Result := vkCode in [VK_LCONTROL, VK_RCONTROL];
+end;
+
+function TKBDLLHookStructHelper.ExtendKey: Boolean;
+begin
+  Result := (flags and LLKHF_EXTENDED) <> 0;
+end;
+
+function TKBDLLHookStructHelper.InjectedKey: Boolean;
+begin
+  Result := (flags and LLKHF_INJECTED) <> 0;
+end;
+
+function TKBDLLHookStructHelper.ShiftDown: Boolean;
+begin
+  Result := vkCode in [VK_LSHIFT, VK_RSHIFT];
+end;
+
+function TKBDLLHookStructHelper.IsKeyDown: Boolean;
+begin
+  Result := (flags and LLKHF_UP) = 0;
+end;
+
+function TKeyStatesHelper.AltDown: Boolean;
+begin
+  Result := (kbAltDwn in Flags);
+end;
+
+function TKeyStatesHelper.CtrlDown: Boolean;
+begin
+  Result := MapVirtualKey(ScanCode, MAPVK_VSC_TO_VK) = VK_CONTROL;
+end;
+
+function TKeyStatesHelper.ExtendKey: Boolean;
+begin
+  Result := (kbExtended in Flags);
+end;
+
+function TKeyStatesHelper.IsKeyDown: Boolean;
+begin
+  // Bit 31: The transition state. The value is 0 if the key is being pressed and 1 if it is being released.
+  Result := not (kbTransitionState in Flags);
+end;
+
+function TKeyStatesHelper.ShiftDown: Boolean;
+begin
+  Result := MapVirtualKey(ScanCode, MAPVK_VSC_TO_VK) = VK_SHIFT;
 end;
 
 end.
