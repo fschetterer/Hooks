@@ -23,6 +23,7 @@ type
     procedure FormCreate(Sender: TObject);
     procedure btActivateLLKeyHookClick(Sender: TObject);
     procedure btActivateMouseClick(Sender: TObject);
+    procedure btYouCantClickMeClick(Sender: TObject);
   private
     FLLKeyHook : THook;
     FKeyHook   : THook;
@@ -65,6 +66,11 @@ begin
   FMouseHook.Active := not FMouseHook.Active;
   TButton(Sender).Caption := Captions[not FMouseHook.Active];
   btYouCantClickMe.Enabled := FMouseHook.Active;
+end;
+
+procedure TFormMain.btYouCantClickMeClick(Sender: TObject);
+begin
+  ShowMessage('You triggered me!');
 end;
 
 procedure TFormMain.FormCreate(Sender: TObject);

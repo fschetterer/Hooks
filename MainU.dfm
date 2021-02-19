@@ -82,9 +82,11 @@ object FormMain: TFormMain
     Top = 204
     Width = 148
     Height = 25
-    Caption = 'You Can'#39't Click Me!'
+    Hint = 'Use the keyboard to trigger me!'
+    Caption = 'You Can'#39't &Click Me!'
     Enabled = False
     TabOrder = 6
+    OnClick = btYouCantClickMeClick
   end
   object ckInvert: TCheckBox
     Left = 321
