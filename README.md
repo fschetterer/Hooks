@@ -4,7 +4,7 @@ However when I began to use it there where some limitations that needed to be so
 I'm sure others will be interested in these and therefore my updated Fork.  
 **Will compile in Berlin and Up!**
 ## Requires [madTools](http://madshi.net/)
-One fix was to replaced *MakeObjectInstance* with *madTools.MethodToProcedure*, you will require that library which I believe is no longer free.  
+One fix was to replaced *MakeObjectInstance* with *madTools.MethodToProcedure*, you will require that library which is freeware.  
 In Win64 this returns the correct sized parameter and also allows access to the *iCode* parameter passed in by the Hook callback function.
 # Change Log
 - replaced *MakeObjectInstance* with *madTools.MethodToProcedure*
